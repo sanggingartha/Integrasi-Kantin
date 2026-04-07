@@ -1,15 +1,19 @@
 <?php
-
+// proses.php (Sebagai Order Service)
 require_once 'config.php';
 $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 
 $item = $_POST['item'];
-$qty  = intval($_POST['qty']); 
+$qty = $_POST['qty'];
 
+// Challenge 1: Validasi Input 
 if ($qty <= 0) {
-    $status_msg = "[WARNING] Jumlah pesanan tidak valid. Qty harus lebih dari 0.";
-    kirimWA($status_msg);
-    exit; 
+    $status = 'gagal';
+    $msg = "Jumlah tidak valid! Qty harus lebih dari 0.";
+
+    // kirim ke notification service
+    kirimNotifikasi($msg, $status);
+    exit;
 }
 
 $res = $conn->query("SELECT * FROM stok_gudang WHERE nama_item = '$item'");
@@ -17,45 +21,32 @@ $data = $res->fetch_assoc();
 
 if ($data && $data['stok'] >= $qty) {
     $stok_baru = $data['stok'] - $qty;
-
-    $conn->query("UPDATE stok_gudang 
-                  SET stok = $stok_baru 
-                  WHERE nama_item = '$item'");
-
-    $status_msg = "Sukses! Pesanan $item ($qty) diproses. Sisa stok: $stok_baru";
+    $conn->query("UPDATE stok_gudang SET stok = $stok_baru WHERE nama_item = '$item'");
+    $status = 'sukses';
+    $msg = "Pesanan $item ($qty) sukses. Sisa: $stok_baru";
 } else {
-    $status_msg = "Gagal! Stok $item tidak mencukupi atau item tidak ada.";
+    $status = 'gagal';
+    $msg = "Stok $item tidak mencukupi!";
 }
 
+kirimNotifikasi($msg, $status);
 
-kirimWA($status_msg);
+function kirimNotifikasi($msg, $status)
+{
+    $service_url = 'http://localhost/integrasi%20sistem/notification_service.php';
 
+    $payload = json_encode([
+        'message' => $msg,
+        'status'  => $status
+    ]);
 
-function kirimWA($pesan) {
+    $ch = curl_init($service_url);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
-    // Jika pesan gagal → tambahkan prefix WARNING
-    if (str_contains($pesan, "Gagal")) {
-        $pesan = "[WARNING] " . $pesan;
-    }
+    $result = curl_exec($ch);
+    curl_close($ch);
 
-    $curl = curl_init();
-
-    curl_setopt_array($curl, array(
-        CURLOPT_URL => 'https://api.fonnte.com/send',
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => array(
-            'target'  => WA_TARGET,
-            'message' => $pesan
-        ),
-        CURLOPT_HTTPHEADER => array(
-            "Authorization: " . WA_TOKEN
-        ),
-    ));
-
-    curl_exec($curl);
-    curl_close($curl);
-
-    echo "Respon Sistem: " . $pesan;
+    echo "Respon Microservice: " . $msg;
 }
-?>
